@@ -27,14 +27,10 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual environments
-.env/
-.venv/
+# Virtual environment
 env/
+.venv/
 venv/
-ENV/
-env.bak/
-venv.bak/
 
 # PyInstaller
 # Usually these are built files and can be ignored
@@ -53,8 +49,9 @@ Thumbs.db
 # Logs and temporary files
 *.log
 
-# Docker files (if applicable)
-docker-compose.override.yml
+# Environment variable files
+.env
 
 # Generated files from proto
-*.pb.go
+*_pb2.py
+*_grpc.py
