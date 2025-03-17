@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+option go_package = "github.com/HJyup/mlt-api";
+
+package api;
+
+service ConfigurationService {
+  rpc CreateConfiguration(CreateConfigurationRequest) returns (CreateConfigurationResponse);
+  rpc UpdateConfiguration(UpdateConfigurationRequest) returns (UpdateConfigurationResponse);
+  rpc GetConfigurationByUserID(GetConfigurationRequest) returns (GetConfigurationResponse);
+}
+
+message CreateConfigurationRequest {
+  string user_id = 1;
+  string open_ai_key = 2;
+}
+
+message CreateConfigurationResponse {
+  string config_id = 1;
+  string message = 2;
+}
+
+message UpdateConfigurationRequest {
+  string config_id = 1;
+  string open_ai_key = 2;
+  CalendarConfig calendar = 3;
+  ThingsConfig things = 4;
+}
+
+message UpdateConfigurationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetConfigurationRequest {
+  string user_id = 1;
+}
+
+message GetConfigurationResponse {
+  string config_id = 1;
+  string user_id = 2;
+  string open_ai_key = 3;
+  CalendarConfig calendar = 4;
+  ThingsConfig things = 5;
+}
+
+message CalendarConfig {
+  string google_api_key = 1;
+  string context = 2;
+}
+
+message ThingsConfig {
+  string context = 1;
+}

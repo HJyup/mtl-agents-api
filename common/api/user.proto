@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+option go_package = "github.com/HJyup/mlt-api";
+
+package api;
+
+service UserService {
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc AuthUser(AuthUserRequest) returns (AuthUserResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+}
+
+message CreateUserRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+}
+
+message CreateUserResponse {
+  string user_id = 1;
+  string message = 2;
+}
+
+message AuthUserRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message AuthUserResponse {
+  string token = 1;
+  string user_id = 2;
+  string message = 3;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  string user_id = 1;
+  string username = 2;
+  string email = 3;
+}
+
+message DeleteUserRequest {
+  string user_id = 1;
+}
+
+message DeleteUserResponse {
+  bool success = 1;
+  string message = 2;
+}

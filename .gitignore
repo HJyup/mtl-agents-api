@@ -23,3 +23,12 @@ go.work.sum
 
 # env file
 .env
+.env.docker
+
+.idea
+
+# Temporary files created by air
+tmp
+
+# Generated files from proto
+*.pb.go

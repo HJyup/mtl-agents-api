@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+option go_package = "github.com/HJyup/mlt-api";
+
+package api;
+
+service AgentService {
+  rpc CreateAgentStream(CreateAgentStreamRequest) returns (stream AgentStreamResponse);
+  rpc SendAgentMessage(SendAgentMessageRequest) returns (SendAgentMessageResponse);
+}
+
+message CreateAgentStreamRequest {
+  string user_id = 1;
+  string config_id = 2;
+}
+
+message AgentStreamResponse {
+  string thread_id = 1;
+  string message = 2;
+}
+
+message SendAgentMessageRequest {
+  string thread_id = 1;
+  string user_id = 2;
+  string message = 3;
+}
+
+message SendAgentMessageResponse {
+  string thread_id = 1;
+  string message = 2;
+}
