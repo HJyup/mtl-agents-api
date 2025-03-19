@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/HJyup/mlt-configuration/internal/service"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -22,10 +22,10 @@ func (s *Store) getCollection() *mongo.Collection {
 	return s.client.Database("mlt-agents-configuration").Collection("configs")
 }
 
-func (s *Store) CreateConfiguration(ctx context.Context, userID int) (*Configuration, error) {
+func (s *Store) CreateConfiguration(ctx context.Context, userID string) (*service.Configuration, error) {
 	collection := s.getCollection()
 
-	var existingConfig Configuration
+	var existingConfig service.Configuration
 	err := collection.FindOne(ctx, bson.M{"user_id": userID}).Decode(&existingConfig)
 	if err == nil {
 		return nil, errors.New("configuration already exists for this user")
@@ -33,9 +33,9 @@ func (s *Store) CreateConfiguration(ctx context.Context, userID int) (*Configura
 		return nil, fmt.Errorf("error checking existing configuration: %w", err)
 	}
 
-	config := Configuration{
+	config := service.Configuration{
 		UserID: userID,
-		Agents: []Agent{},
+		Agents: []service.Agent{},
 	}
 
 	result, err := collection.InsertOne(ctx, config)
@@ -43,14 +43,14 @@ func (s *Store) CreateConfiguration(ctx context.Context, userID int) (*Configura
 		return nil, fmt.Errorf("failed to create configuration: %w", err)
 	}
 
-	config.ID = result.InsertedID.(primitive.ObjectID)
+	config.ID = result.InsertedID.(string)
 
 	return &config, nil
 }
 
-func (s *Store) GetConfiguration(ctx context.Context, userID int) (*Configuration, error) {
+func (s *Store) GetConfiguration(ctx context.Context, userID string) (*service.Configuration, error) {
 	collection := s.getCollection()
-	var config Configuration
+	var config service.Configuration
 	err := collection.FindOne(ctx, bson.M{"user_id": userID}).Decode(&config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get configuration: %w", err)
@@ -59,18 +59,18 @@ func (s *Store) GetConfiguration(ctx context.Context, userID int) (*Configuratio
 	return &config, nil
 }
 
-func (s *Store) UpdateConfiguration(ctx context.Context, config Configuration) (*Configuration, error) {
+func (s *Store) UpdateConfiguration(ctx context.Context, config *service.Configuration) (*service.Configuration, error) {
 	collection := s.getCollection()
 
 	filter := bson.M{"user_id": config.UserID}
 
-	if !config.ID.IsZero() {
+	if config.ID == "" {
 		filter = bson.M{"_id": config.ID}
 	}
 
 	opts := options.FindOneAndReplace().SetReturnDocument(options.After)
 
-	var updatedConfig Configuration
+	var updatedConfig service.Configuration
 	err := collection.FindOneAndReplace(ctx, filter, config, opts).Decode(&updatedConfig)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -82,7 +82,7 @@ func (s *Store) UpdateConfiguration(ctx context.Context, config Configuration) (
 	return &updatedConfig, nil
 }
 
-func (s *Store) DeleteConfiguration(ctx context.Context, userID int) error {
+func (s *Store) DeleteConfiguration(ctx context.Context, userID string) error {
 	collection := s.getCollection()
 
 	result, err := collection.DeleteOne(ctx, bson.M{"user_id": userID})

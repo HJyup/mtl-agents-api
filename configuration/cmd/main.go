@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/HJyup/mlt-configuration/internal/handler"
+	"github.com/HJyup/mlt-configuration/internal/service"
+	"github.com/HJyup/mlt-configuration/internal/store"
 	common "github.com/HJyup/mtl-common"
 	"github.com/HJyup/mtl-common/consul"
 	_ "github.com/joho/godotenv/autoload"
@@ -11,6 +14,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"net"
 )
 
 type Specification struct {
@@ -72,6 +77,22 @@ func main() {
 	if err = registry.Register(instanceID, s.ServiceName, s.Address); err != nil {
 		logger.Fatal("Failed to register service: %v", zap.Error(err))
 	}
+
+	grpcServer := grpc.NewServer()
+	conn, err := net.Listen("tcp", s.Address)
+	if err != nil {
+		logger.Fatal("Failed to listen on %s: %v", zap.String("port", s.Address), zap.Error(err))
+	}
+	defer func(conn net.Listener) {
+		err = conn.Close()
+		if err != nil {
+			logger.Warn("Failed to close connection", zap.Error(err))
+		}
+	}(conn)
+
+	str := store.NewStore(client)
+	srv := service.NewService(str, logger)
+	handler.NewHandler(grpcServer, srv)
 
 	logger.Info("Starting HTTP server", zap.String("port", s.Address))
 }
