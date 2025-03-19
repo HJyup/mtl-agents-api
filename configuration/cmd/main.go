@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/HJyup/mlt-configuration/internal/handler"
 	"github.com/HJyup/mlt-configuration/internal/service"
 	"github.com/HJyup/mlt-configuration/internal/store"
@@ -19,14 +18,12 @@ import (
 )
 
 type Specification struct {
-	ServiceName string `required:"true" default:"configuration"`
-	Address     string `required:"true"`
-	Consul      string `required:"true"`
-	Environment string `required:"true"`
-	DBName      string `required:"true"`
-	DBPassword  string `required:"true"`
-	DBAddress   string `required:"true"`
-	DBAppName   string `required:"true"`
+	ServiceName   string `required:"true" default:"configuration"`
+	Address       string `required:"true"`
+	Consul        string `required:"true"`
+	Environment   string `required:"true"`
+	DBLink        string `required:"true"`
+	EncryptionKey string `required:"true"`
 }
 
 func main() {
@@ -47,12 +44,8 @@ func main() {
 	}
 
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	uri := fmt.Sprintf(
-		"mongodb+srv://%s:%s@%s/?retryWrites=true&w=majority&appName=%s",
-		s.DBName, s.DBPassword, s.DBAddress, s.DBAppName,
-	)
 
-	opts := options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI)
+	opts := options.Client().ApplyURI(s.DBLink).SetServerAPIOptions(serverAPI)
 
 	client, err := mongo.Connect(ctx, opts)
 	if err != nil {
@@ -77,12 +70,19 @@ func main() {
 	if err = registry.Register(instanceID, s.ServiceName, s.Address); err != nil {
 		logger.Fatal("Failed to register service: %v", zap.Error(err))
 	}
-	defer func(registry *consul.Registry, instanceID string) {
-		err = registry.DeRegister(instanceID)
-		if err != nil {
-			logger.Fatal("Failed to deregister service: %v", zap.Error(err))
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				if err = registry.HealthCheck(instanceID); err != nil {
+					logger.Error("Failed to health check: %v", zap.Error(err))
+				}
+			}
 		}
-	}(registry, instanceID)
+	}()
+	defer registry.DeRegister(instanceID)
 
 	grpcServer := grpc.NewServer()
 	conn, err := net.Listen("tcp", s.Address)
@@ -97,7 +97,10 @@ func main() {
 	}(conn)
 
 	str := store.NewStore(client)
-	srv := service.NewService(str, logger)
+	srv, err := service.NewService(str, logger, s.EncryptionKey)
+	if err != nil {
+		logger.Fatal("Failed to create service", zap.Error(err))
+	}
 	handler.NewHandler(grpcServer, srv)
 
 	logger.Info("Starting HTTP server", zap.String("port", s.Address))

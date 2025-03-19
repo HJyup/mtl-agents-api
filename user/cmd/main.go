@@ -71,12 +71,19 @@ func main() {
 	if err = registry.Register(instanceID, s.ServiceName, s.Address); err != nil {
 		logger.Fatal("Failed to register service: %v", zap.Error(err))
 	}
-	defer func(registry *consul.Registry, instanceID string) {
-		err = registry.DeRegister(instanceID)
-		if err != nil {
-			logger.Fatal("Failed to deregister service: %v", zap.Error(err))
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				if err = registry.HealthCheck(instanceID); err != nil {
+					logger.Error("Failed to health check: %v", zap.Error(err))
+				}
+			}
 		}
-	}(registry, instanceID)
+	}()
+	defer registry.DeRegister(instanceID)
 
 	grpcServer := grpc.NewServer()
 	conn, err := net.Listen("tcp", s.Address)
