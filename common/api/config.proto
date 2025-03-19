@@ -8,6 +8,7 @@ service ConfigurationService {
   rpc CreateConfiguration(CreateConfigurationRequest) returns (CreateConfigurationResponse);
   rpc UpdateConfiguration(UpdateConfigurationRequest) returns (UpdateConfigurationResponse);
   rpc GetConfigurationByUserID(GetConfigurationRequest) returns (GetConfigurationResponse);
+  rpc DeleteConfigurationByUserID(DeleteConfigurationRequest) returns (DeleteConfigurationResponse);
 }
 
 message CreateConfigurationRequest {
@@ -42,6 +43,15 @@ message GetConfigurationResponse {
   string open_ai_key = 3;
   CalendarConfig calendar = 4;
   ThingsConfig things = 5;
+}
+
+message DeleteConfigurationRequest {
+  string user_id = 1;
+}
+
+message DeleteConfigurationResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message CalendarConfig {
