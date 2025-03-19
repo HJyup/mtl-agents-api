@@ -3,6 +3,7 @@ module github.com/HJyup/mtl-common
 go 1.23.4
 
 require (
+	github.com/golang-jwt/jwt/v4 v4.5.1
 	github.com/hashicorp/consul/api v1.31.2
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0
 	google.golang.org/grpc v1.71.0

@@ -55,11 +55,12 @@ func main() {
 	if err = registry.Register(instanceID, s.ServiceName, s.Address); err != nil {
 		logger.Fatal("Failed to register service", zap.Error(err))
 	}
-	defer func() {
-		if err = registry.DeRegister(instanceID); err != nil {
-			logger.Error("Failed to deregister service", zap.Error(err))
+	defer func(registry *consul.Registry, instanceID string) {
+		err = registry.DeRegister(instanceID)
+		if err != nil {
+			logger.Fatal("Failed to deregister service: %v", zap.Error(err))
 		}
-	}()
+	}(registry, instanceID)
 
 	router := mux2.NewRouter()
 

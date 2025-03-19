@@ -77,6 +77,12 @@ func main() {
 	if err = registry.Register(instanceID, s.ServiceName, s.Address); err != nil {
 		logger.Fatal("Failed to register service: %v", zap.Error(err))
 	}
+	defer func(registry *consul.Registry, instanceID string) {
+		err = registry.DeRegister(instanceID)
+		if err != nil {
+			logger.Fatal("Failed to deregister service: %v", zap.Error(err))
+		}
+	}(registry, instanceID)
 
 	grpcServer := grpc.NewServer()
 	conn, err := net.Listen("tcp", s.Address)
@@ -95,4 +101,7 @@ func main() {
 	handler.NewHandler(grpcServer, srv)
 
 	logger.Info("Starting HTTP server", zap.String("port", s.Address))
+	if err = grpcServer.Serve(conn); err != nil {
+		logger.Fatal("Failed to serve gRPC: %v", zap.Error(err))
+	}
 }

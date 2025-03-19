@@ -29,8 +29,7 @@ message AuthUserRequest {
 
 message AuthUserResponse {
   string token = 1;
-  string user_id = 2;
-  string message = 3;
+  string message = 2;
 }
 
 message GetUserRequest {
