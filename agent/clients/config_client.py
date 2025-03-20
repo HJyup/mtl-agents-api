@@ -18,14 +18,12 @@ class ConfigurationClient:
             if not service_info:
                 print(f"Configuration service '{self.service_name}' not found in Consul")
                 return False
-                
-            host, port = service_info
-            target = f"{host}:{port}"
 
-            self.channel = grpc.insecure_channel(target)
+            port = service_info[0]
+            self.channel = grpc.insecure_channel(port)
             self.stub = config_pb2_grpc.ConfigurationServiceStub(self.channel)
             
-            print(f"Connected to configuration service at {target}")
+            print(f"Connected to configuration service at {service_info}")
             return True
         except Exception as e:
             print(f"Error connecting to configuration service: {str(e)}")

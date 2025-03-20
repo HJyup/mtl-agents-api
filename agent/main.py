@@ -22,12 +22,9 @@ def main():
     instance_id = generate_instance_id(service_name)
     host_port = os.getenv("AGENT_ADDRESS")
 
-    grpc_port = int(host_port.split(":")[-1]) if ":" in host_port else 50051
-
     try:
-        server = serve(grpc_port)
-
         consul_client.register(instance_id, service_name, host_port)
+        server = serve(host_port, consul_client)
         logging.info(f"Service registered: {service_name} (ID: {instance_id})")
 
         health_thread = threading.Thread(

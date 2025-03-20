@@ -55,3 +55,4 @@ Thumbs.db
 # Generated files from proto
 *_pb2.py
 *_grpc.py
+*.pyi

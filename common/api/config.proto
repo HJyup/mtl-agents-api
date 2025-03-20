@@ -4,61 +4,114 @@ option go_package = "github.com/HJyup/mlt-api";
 
 package api;
 
+// ConfigurationService manages user configurations for the agent system
+// Provides methods to create, update, retrieve, and delete configurations
 service ConfigurationService {
+  // Creates a new configuration for a user
   rpc CreateConfiguration(CreateConfigurationRequest) returns (CreateConfigurationResponse);
+
+  // Updates an existing configuration with new settings
   rpc UpdateConfiguration(UpdateConfigurationRequest) returns (UpdateConfigurationResponse);
+
+  // Retrieves a configuration using a user ID
   rpc GetConfigurationByUserID(GetConfigurationRequest) returns (GetConfigurationResponse);
+
+  // Deletes a configuration for a specific user
   rpc DeleteConfigurationByUserID(DeleteConfigurationRequest) returns (DeleteConfigurationResponse);
 }
 
+// Request message for creating a new configuration
 message CreateConfigurationRequest {
+  // Unique identifier for the user
   string user_id = 1;
+
+  // OpenAI API key for the user's configuration
   string open_ai_key = 2;
 }
 
+// Response message for configuration creation operation
 message CreateConfigurationResponse {
+  // Unique identifier for the newly created configuration
   string config_id = 1;
+
+  // Status message about the creation operation
   string message = 2;
 }
 
+// Request message for updating an existing configuration
 message UpdateConfigurationRequest {
+  // Unique identifier for the configuration to update
   string config_id = 1;
+
+  // Updated OpenAI API key
   string open_ai_key = 2;
+
+  // Calendar integration configuration
   CalendarConfig calendar = 3;
+
+  // Things (task management) integration configuration
   ThingsConfig things = 4;
 }
 
+// Response message for configuration update operation
 message UpdateConfigurationResponse {
+  // Indicates whether the update was successful
   bool success = 1;
+
+  // Status message about the update operation
   string message = 2;
 }
 
+// Request message for retrieving a configuration by user ID
 message GetConfigurationRequest {
+  // User ID whose configuration should be retrieved
   string user_id = 1;
 }
 
+// Response message containing a user's configuration details
 message GetConfigurationResponse {
+  // Unique identifier for the configuration
   string config_id = 1;
+
+  // User ID associated with this configuration
   string user_id = 2;
+
+  // OpenAI API key stored in the configuration
   string open_ai_key = 3;
+
+  // Calendar integration settings
   CalendarConfig calendar = 4;
+
+  // Things (task management) integration settings
   ThingsConfig things = 5;
 }
 
+// Request message for deleting a configuration by user ID
 message DeleteConfigurationRequest {
+  // User ID whose configuration should be deleted
   string user_id = 1;
 }
 
+// Response message for configuration deletion operation
 message DeleteConfigurationResponse {
+  // Indicates whether the deletion was successful
   bool success = 1;
+
+  // Status message about the deletion operation
   string message = 2;
 }
 
+// Configuration settings for calendar integration
 message CalendarConfig {
+  // Google API key for calendar access
   string google_api_key = 1;
+
+  // Additional context or settings for calendar integration
   string context = 2;
 }
 
+// Configuration settings for Things (task management) integration
 message ThingsConfig {
+  // Context or settings for Things integration
   string context = 1;
 }

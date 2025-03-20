@@ -4,49 +4,90 @@ option go_package = "github.com/HJyup/mlt-api";
 
 package api;
 
+// UserService handles user account management operations
+// Provides methods for creating, authenticating, retrieving, and deleting users
 service UserService {
+  // Creates a new user account
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // Authenticates a user and returns a session token
   rpc AuthUser(AuthUserRequest) returns (AuthUserResponse);
+
+  // Retrieves user information by user ID
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
+
+  // Deletes a user account
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
 }
 
+// Request message for creating a new user account
 message CreateUserRequest {
+  // Username for the new account
   string username = 1;
+
+  // Email address for the new account
   string email = 2;
+
+  // Password for the new account
   string password = 3;
 }
 
+// Response message for user creation operation
 message CreateUserResponse {
+  // Unique identifier for the newly created user
   string user_id = 1;
+
+  // Status message about the creation operation
   string message = 2;
 }
 
+// Request message for user authentication
 message AuthUserRequest {
+  // Email address for authentication
   string email = 1;
+
+  // Password for authentication
   string password = 2;
 }
 
+// Response message for user authentication operation
 message AuthUserResponse {
+  // Authentication token for the user session
   string token = 1;
+
+  // Status message about the authentication operation
   string message = 2;
 }
 
+// Request message for retrieving user information
 message GetUserRequest {
+  // Unique identifier for the user to retrieve
   string user_id = 1;
 }
 
+// Response message containing user information
 message GetUserResponse {
+  // Unique identifier for the user
   string user_id = 1;
+
+  // Username of the user
   string username = 2;
+
+  // Email address of the user
   string email = 3;
 }
 
+// Request message for deleting a user account
 message DeleteUserRequest {
+  // Unique identifier for the user to delete
   string user_id = 1;
 }
 
+// Response message for user deletion operation
 message DeleteUserResponse {
+  // Indicates whether the deletion was successful
   bool success = 1;
+
+  // Status message about the deletion operation
   string message = 2;
 }

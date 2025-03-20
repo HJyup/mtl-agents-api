@@ -77,7 +77,6 @@ def health_check_loop(consul_client, instance_id):
     while True:
         try:
             consul_client.health_check(instance_id)
-            logging.info(f"Health check updated for instance {instance_id}")
             time.sleep(3)
         except Exception as e:
             logging.error(f"Health check failed: {e}")
