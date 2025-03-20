@@ -3,6 +3,7 @@ from typing import Optional
 from agent.protos import config_pb2, config_pb2_grpc
 from agent.utils.consul import ConsulClient
 
+
 class ConfigurationClient:
     
     def __init__(self, consul_client: ConsulClient, service_name: str = "configuration"):
@@ -13,7 +14,7 @@ class ConfigurationClient:
         
     def connect(self) -> bool:
         try:
-            service_info = self.consul_client.discover_service(self.service_name)
+            service_info = self.consul_client.discover(self.service_name)
             if not service_info:
                 print(f"Configuration service '{self.service_name}' not found in Consul")
                 return False

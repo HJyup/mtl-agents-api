@@ -1,64 +1,54 @@
 import logging
+import os
+import threading
+import time
+
 from dotenv import load_dotenv
-from agent.config import settings
-from agent.utils.consul import ConsulClient
-from agent.clients.config_client import ConfigurationClient
-from agent.service.agent_service import serve as start_agent_service
-from agents import set_default_openai_key
+
+from agent.service.initialise import serve
+from agent.utils.consul import ConsulClient, health_check_loop, generate_instance_id
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def main():
-    """Main entry point for the agent service."""
-    logger.info("Starting agent service...")
+    consul_addr = os.getenv("AGENT_CONSUL")
+    consul_client = ConsulClient(consul_addr)
 
-    if settings.OPENAI_API_KEY:
-        set_default_openai_key(key=settings.OPENAI_API_KEY)
-        logger.info("Set OpenAI API key from environment")
+    service_name = os.getenv("AGENT_SERVICENAME")
+    instance_id = generate_instance_id(service_name)
+    host_port = os.getenv("AGENT_ADDRESS")
 
-    consul_client = ConsulClient(
-        host=settings.CONSUL_HOST,
-        port=settings.CONSUL_PORT,
-        service_name=settings.SERVICE_NAME,
-        service_port=settings.SERVICE_PORT,
-        service_host=settings.SERVICE_HOST
-    )
+    grpc_port = int(host_port.split(":")[-1]) if ":" in host_port else 50051
 
     try:
-        instance_id = consul_client.register()
-        logger.info(f"Registered with Consul as {instance_id}")
-    except Exception as e:
-        logger.error(f"Failed to register with Consul: {e}")
-        logger.warning("Running without service discovery")
+        server = serve(grpc_port)
 
-    config_client = ConfigurationClient(
-        consul_client=consul_client,
-        service_name=settings.CONFIG_SERVICE_NAME
-    )
-    
-    try:
-        start_agent_service(
-            host=settings.SERVICE_HOST,
-            port=settings.SERVICE_PORT,
-            config_client=config_client,
+        consul_client.register(instance_id, service_name, host_port)
+        logging.info(f"Service registered: {service_name} (ID: {instance_id})")
+
+        health_thread = threading.Thread(
+            target=health_check_loop,
+            args=(consul_client, instance_id),
+            daemon=True
         )
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
-    except Exception as e:
-        logger.error(f"Error starting service: {e}", exc_info=True)
-    finally:
-        # Deregister from Consul
+        health_thread.start()
+
+        logging.info("Service is running...")
+
         try:
-            consul_client.deregister()
-            logger.info("Deregistered from Consul")
-        except Exception as e:
-            logger.error(f"Error deregistering from Consul: {e}")
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logging.info("Shutting down...")
+            server.stop(0)
+
+    finally:
+        consul_client.deregister(instance_id)
+        logging.info(f"Service deregistered: {instance_id}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,9 @@
-from agents import Agent
-from datetime import datetime, timedelta
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from dotenv import load_dotenv
+from agents import Agent, function_tool
+
+load_dotenv()
 
 instructions = """
 You are a calendar assistant that interprets natural language requests for scheduling events. Your task is to extract structured data from user messages about calendar events. The timezone is London.
@@ -42,37 +46,47 @@ You are a calendar assistant that interprets natural language requests for sched
 - For recurring events, clearly identify the pattern and suggest appropriate scheduling.
 """
 
+@function_tool
+def get_google_people_contacts():
+    SCOPES = ['https://www.googleapis.com/auth/contacts.readonly']
+    SERVICE_ACCOUNT_FILE = 'path/to/your/service_account.json'
 
-def calendar_events(from_date, to_date):
-    events = [
-        {
-            "summary": "Team Meeting",
-            "start": {
-                "dateTime": (from_date + timedelta(hours=9)).strftime('%Y-%m-%dT%H:%M:%S'),
-                "timeZone": "UTC"
-            },
-            "end": {
-                "dateTime": (from_date + timedelta(hours=10)).strftime('%Y-%m-%dT%H:%M:%S'),
-                "timeZone": "UTC"
-            }
-        },
-        {
-            "summary": "Project Review",
-            "start": {
-                "dateTime": (from_date + timedelta(days=1, hours=11)).strftime('%Y-%m-%dT%H:%M:%S'),
-                "timeZone": "UTC"
-            },
-            "end": {
-                "dateTime": (from_date + timedelta(days=1, hours=12)).strftime('%Y-%m-%dT%H:%M:%S'),
-                "timeZone": "UTC"
-            }
-        }
-    ]
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES
+    )
 
-    filtered_events = [event for event in events if
-                       from_date <= datetime.strptime(event["start"]["dateTime"], '%Y-%m-%dT%H:%M:%S') <= to_date]
+    service = build('people', 'v1', credentials=credentials)
 
-    return filtered_events
+    results = service.people().connections().list(
+        resourceName='people/me',
+        pageSize=100,
+        personFields='names,emailAddresses'
+    ).execute()
+
+    connections = results.get('connections', [])
+    return connections
 
 
-agent = Agent(name="Gateway agent", instructions=instructions)
+@function_tool
+def fetch_google_calendar_events(start_date, end_date):
+    SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+    SERVICE_ACCOUNT_FILE = 'path/to/your/service_account.json'
+
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES
+    )
+
+    service = build('calendar', 'v3', credentials=credentials)
+
+    events_result = service.events().list(
+        calendarId='primary',
+        timeMin=start_date.isoformat() + 'Z',
+        timeMax=end_date.isoformat() + 'Z',
+        singleEvents=True,
+        orderBy='startTime'
+    ).execute()
+
+    events = events_result.get('items', [])
+    return events
+
+agent = Agent(name="Gateway agent", instructions=instructions, tools=[get_google_people_contacts, fetch_google_calendar_events])

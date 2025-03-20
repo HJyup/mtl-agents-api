@@ -1,65 +1,87 @@
-import consul
-import socket
-import uuid
+import os
 import time
-import threading
-from typing import Optional
+
+import consul
+import logging
+from typing import List
+import contextlib
 
 class ConsulClient:
+    def __init__(self, addr: str):
+        host, port = addr.split(":")
+        self.client = consul.Consul(host=host, port=int(port))
+        self.logger = logging.getLogger(__name__)
 
-    def __init__(self, host: str, port: int, service_name: str, service_port: int, service_host: str = "0.0.0.0"):
-        self.client = consul.Consul(host=host, port=port)
-        self.service_name = service_name
-        self.service_port = service_port
-        self.service_host = service_host
-        self.instance_id = f"{service_name}-{uuid.uuid4()}"
-        self._health_check_thread = None
-        self._stop_event = threading.Event()
-
-    def register(self):
-        """Register the service with Consul."""
-        self.client.agent.service.register(
-            name=self.service_name,
-            service_id=self.instance_id,
-            address=self.service_host,
-            port=self.service_port,
-            check=consul.Check.tcp(self.service_host, self.service_port, "10s")
-        )
-        print(f"Registered service {self.service_name} with ID {self.instance_id}")
-
-        self._health_check_thread = threading.Thread(target=self._health_check_loop)
-        self._health_check_thread.daemon = True
-        self._health_check_thread.start()
-        
-        return self.instance_id
-
-    def deregister(self):
-        self._stop_event.set()
-        if self._health_check_thread and self._health_check_thread.is_alive():
-            self._health_check_thread.join(timeout=1)
-            
-        self.client.agent.service.deregister(self.instance_id)
-        print(f"Deregistered service {self.service_name} with ID {self.instance_id}")
-
-    def _health_check_loop(self):
-        while not self._stop_event.is_set():
+    def register(self, instance_id: str, server_name: str, host_port: str) -> bool:
+        try:
+            host, port = host_port.split(":")
             try:
-                self.client.agent.check.ttl_pass(f"service:{self.instance_id}")
-                time.sleep(5)
-            except Exception as e:
-                print(f"Error in health check: {str(e)}")
-                time.sleep(1)
+                port = int(port)
+            except ValueError:
+                raise ValueError("Invalid port")
 
-    def discover_service(self, service_name: str) -> Optional[tuple[str, int]]:
-        index, services = self.client.catalog.service(service_name)
-        if not services:
-            return None
+            self.client.agent.service.register(
+                name=server_name,
+                service_id=instance_id,
+                address=host,
+                port=port,
+                check=consul.Check.ttl("10s")
+            )
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to register service: {e}")
+            raise
 
-        service = services[0]
-        return service["ServiceAddress"], service["ServicePort"]
-        
-    @staticmethod
-    def generate_instance_id(service_name: str) -> str:
-        """Generate a unique instance ID for a service."""
-        hostname = socket.gethostname()
-        return f"{service_name}-{hostname}-{uuid.uuid4()}" 
+    def deregister(self, instance_id: str) -> bool:
+        self.logger.info(f"DeRegistering service with ID: {instance_id}")
+        try:
+            self.client.agent.service.deregister(instance_id)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to deregister service: {e}")
+            raise
+
+    def discover(self, server_name: str) -> List[str]:
+        try:
+            _, services = self.client.health.service(server_name, passing=True)
+            instances = []
+
+            for service in services:
+                address = service['Service']['Address']
+                port = service['Service']['Port']
+                instances.append(f"{address}:{port}")
+
+            return instances
+        except Exception as e:
+            self.logger.error(f"Failed to discover services: {e}")
+            raise
+
+    def health_check(self, instance_id: str) -> bool:
+        try:
+            self.client.agent.check.ttl_pass(f"service:{instance_id}", "online")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to update health check: {e}")
+            raise
+
+@contextlib.contextmanager
+def registered_service(client, instance_id, server_name, host_port):
+    try:
+        client.register(instance_id, server_name, host_port)
+        yield
+    finally:
+        client.deregister(instance_id)
+
+
+def health_check_loop(consul_client, instance_id):
+    while True:
+        try:
+            consul_client.health_check(instance_id)
+            logging.info(f"Health check updated for instance {instance_id}")
+            time.sleep(3)
+        except Exception as e:
+            logging.error(f"Health check failed: {e}")
+            break
+
+def generate_instance_id(server_name):
+    return f"{server_name}-{os.urandom(8).hex()}"
