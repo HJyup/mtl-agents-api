@@ -20,30 +20,21 @@ service AgentService {
 message CreateAgentStreamRequest {
   // Unique identifier for the user initiating the conversation
   string user_id = 1;
-
-  // Configuration identifier that specifies agent parameters/behavior
-  string config_id = 2;
 }
 
 // Response message returned in the agent conversation stream
 message AgentStreamResponse {
-  // Unique identifier for the conversation thread
-  string thread_id = 1;
-
   // Content of the message from the agent
-  string message = 2;
+  string message = 1;
 }
 
 // Request message for sending a message to an existing agent conversation
 message SendAgentMessageRequest {
-  // Identifier for the conversation thread to send the message to
-  string thread_id = 1;
-
   // Identifier of the user sending the message
-  string user_id = 2;
+  string user_id = 1;
 
   // Content of the message being sent to the agent
-  string message = 3;
+  string message = 2;
 }
 
 // Response message returned after sending a message to an agent

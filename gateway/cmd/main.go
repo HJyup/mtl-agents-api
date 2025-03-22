@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"github.com/HJyup/mlt-gateway/internal/gateway"
+	"github.com/HJyup/mlt-gateway/internal/handler"
 	"github.com/HJyup/mtl-common"
 	"github.com/HJyup/mtl-common/consul"
 	mux2 "github.com/gorilla/mux"
@@ -63,6 +65,18 @@ func main() {
 	}(registry, instanceID)
 
 	router := mux2.NewRouter()
+
+	userGateway := gateway.NewUserGateway(registry, logger)
+	userHandler := handler.NewUserHandler(userGateway)
+	userHandler.RegisterRoutes(router)
+
+	configGateway := gateway.NewConfigurationGateway(registry, logger)
+	configHandler := handler.NewConfigurationHandler(configGateway)
+	configHandler.RegisterRoutes(router)
+
+	agentGateway := gateway.NewAgentGateway(registry, logger)
+	agentHandler := handler.NewAgentHandler(agentGateway)
+	agentHandler.RegisterRoutes(router)
 
 	logger.Info("Starting server", zap.String("address", s.Address))
 	if err = http.ListenAndServe(s.Address, router); err != nil {
