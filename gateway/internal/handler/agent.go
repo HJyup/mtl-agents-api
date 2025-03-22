@@ -94,6 +94,12 @@ func (h *AgentHandler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 	wg.Add(2)
 
 	done := make(chan struct{})
+	var once sync.Once
+	closeDone := func() {
+		once.Do(func() {
+			close(done)
+		})
+	}
 
 	go func() {
 		defer wg.Done()
@@ -104,6 +110,7 @@ func (h *AgentHandler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 			default:
 				response, err := stream.Recv()
 				if err == io.EOF {
+					closeDone()
 					return
 				}
 				if err != nil {
@@ -113,7 +120,7 @@ func (h *AgentHandler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 						Content: fmt.Sprintf("Stream error: %v", err),
 					}
 					conn.WriteJSON(errorMsg)
-					close(done)
+					closeDone()
 					return
 				}
 
@@ -129,14 +136,14 @@ func (h *AgentHandler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 					wsMsg.Type = "ERROR"
 				case pb.MessageType_CLOSE:
 					wsMsg.Type = "CLOSE"
-					defer close(done)
+					closeDone()
 				default:
 					wsMsg.Type = "UNKNOWN"
 				}
 
 				if err := conn.WriteJSON(wsMsg); err != nil {
 					log.Printf("Error writing to websocket: %v", err)
-					close(done)
+					closeDone()
 					return
 				}
 			}
@@ -152,7 +159,8 @@ func (h *AgentHandler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 			default:
 				var wsMsg WebSocketMessage
 				if err := conn.ReadJSON(&wsMsg); err != nil {
-					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway,
+						websocket.CloseAbnormalClosure) {
 						log.Printf("WebSocket closed unexpectedly: %v", err)
 					}
 					closeMsg := &pb.AgentMessage{
@@ -160,11 +168,10 @@ func (h *AgentHandler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 						UserId:  userID,
 						Content: "Connection closed by client",
 					}
-					err = stream.Send(closeMsg)
-					if err != nil {
+					if err = stream.Send(closeMsg); err != nil {
 						log.Printf("Error sending close message: %v", err)
 					}
-					close(done)
+					closeDone()
 					return
 				}
 
@@ -174,7 +181,7 @@ func (h *AgentHandler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 					msgType = pb.MessageType_USER_MESSAGE
 				case "CLOSE":
 					msgType = pb.MessageType_CLOSE
-					defer close(done)
+					closeDone()
 				default:
 					log.Printf("Unknown message type: %s", wsMsg.Type)
 					continue
@@ -187,14 +194,14 @@ func (h *AgentHandler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 					Metadata: wsMsg.Metadata,
 				}
 
-				if err := stream.Send(grpcMsg); err != nil {
+				if err = stream.Send(grpcMsg); err != nil {
 					log.Printf("Error sending to stream: %v", err)
 					errorMsg := WebSocketMessage{
 						Type:    "ERROR",
 						Content: fmt.Sprintf("Failed to send message: %v", err),
 					}
 					conn.WriteJSON(errorMsg)
-					close(done)
+					closeDone()
 					return
 				}
 			}
