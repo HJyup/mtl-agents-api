@@ -104,6 +104,7 @@ func main() {
 	handler.NewHandler(grpcServer, srv)
 
 	logger.Info("Starting HTTP server", zap.String("port", s.Address))
+
 	if err = grpcServer.Serve(conn); err != nil {
 		logger.Fatal("Failed to serve gRPC: %v", zap.Error(err))
 	}

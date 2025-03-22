@@ -49,7 +49,6 @@ def generate_proto_files():
             sys.exit(1)
 
 def fix_imports(proto_name):
-    """Fix imports in generated files to use the custom package path."""
     pb2_file = os.path.join(OUTPUT_DIR, f"{proto_name}_pb2.py")
     grpc_file = os.path.join(OUTPUT_DIR, f"{proto_name}_pb2_grpc.py")
 

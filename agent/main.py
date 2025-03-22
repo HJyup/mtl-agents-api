@@ -2,11 +2,10 @@ import logging
 import os
 import threading
 import time
-
 from dotenv import load_dotenv
 
-from agent.service.initialise import serve
-from agent.utils.consul import ConsulClient, health_check_loop, generate_instance_id
+from agent.service import serve
+from agent.utils import ConsulClient, health_check_loop, generate_instance_id
 
 load_dotenv()
 
@@ -33,7 +32,6 @@ def main():
             daemon=True
         )
         health_thread.start()
-
         logging.info("Service is running...")
 
         try:

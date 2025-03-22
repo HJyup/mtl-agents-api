@@ -1,14 +1,17 @@
 package service
 
-type Agent struct {
-	Type         string `bson:"type"`
-	GoogleAPIKey string `bson:"google_api_key,omitempty"`
-	Context      string `bson:"context,omitempty"`
+type Configuration struct {
+	UserID    string         `bson:"user_id"`
+	OpenAIKey string         `bson:"open_ai_key"`
+	Calendar  CalendarConfig `bson:"calendar"`
+	Things    ThingsConfig   `bson:"things"`
 }
 
-type Configuration struct {
-	ID        string  `bson:"_id,omitempty"`
-	UserID    string  `bson:"user_id"`
-	OpenAIKey string  `bson:"openai_key,omitempty"`
-	Agents    []Agent `bson:"agents,omitempty"`
+type CalendarConfig struct {
+	GoogleAPIKey string `bson:"google_api_key"`
+	Context      string `bson:"context"`
+}
+
+type ThingsConfig struct {
+	Context string `bson:"context"`
 }

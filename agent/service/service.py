@@ -1,70 +1,97 @@
 import logging
-import uuid
+import asyncio
 import grpc
-from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
+from typing import Dict, Any
 
+from agents import Runner, RunResult
 from agent.clients import ConfigurationClient
+from agent.models import create_agent_for_user
 from agent.protos import agent_pb2, agent_pb2_grpc
 
 logger = logging.getLogger(__name__)
 
 class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
-    def __init__(self, configuration_service):
-        self.configuration_service: ConfigurationClient = configuration_service
-        self.active_conversations = {}
+    def __init__(self, configuration_service: ConfigurationClient):
+        self.configuration_service = configuration_service
+        self.user_conversations: Dict[str, Dict[str, Any]] = {}
         self.lock = Lock()
-        self.executor = ThreadPoolExecutor(max_workers=10)
+
+    async def _process_message(self, user_id: str, message: str) -> str:
+        conversation_data = self.user_conversations.get(user_id)
+        if not conversation_data:
+            raise ValueError(f"No active conversation found for user {user_id}")
+
+        agent = conversation_data["agent"]
+        history = conversation_data["history"]
+
+        result: RunResult = await Runner.run(
+            agent,
+            input=message,
+            context=history
+        )
+
+        conversation_data["history"].append(result.final_output)
+        return result.final_output
 
     def CreateAgentStream(self, request, context):
         user_id = request.user_id
-        thread_id = str(uuid.uuid4())
-
-        configuration = self.configuration_service.get_configuration(user_id)
-
-        with self.lock:
-            self.active_conversations[user_id] = thread_id
-
-        logger.info(f"Created new conversation {thread_id} for user {user_id}")
-
-        initial_response = agent_pb2.AgentStreamResponse(
-            thread_id=thread_id,
-            message="Agent conversation initialized"
-        )
-        yield initial_response
 
         try:
-            context.add_callback(lambda: logger.info(f"Stream closed for conversation {thread_id}"))
-            while not context.is_active() or context.cancelled():
-                pass
+            config = self.configuration_service.get_configuration(user_id)
+            if not config:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details(f"Configuration not found for user {user_id}")
+                return
+
+            agent = create_agent_for_user(config)
         except Exception as e:
-            logger.error(f"Error in stream for conversation {thread_id}: {str(e)}")
-        finally:
-            with self.lock:
-                if user_id in self.active_conversations and self.active_conversations[user_id] == thread_id:
-                    del self.active_conversations[user_id]
-                    logger.info(f"Conversation {thread_id} for user {user_id} cleaned up")
+            logger.error(f"Failed to create agent for user {user_id}: {str(e)}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Failed to create agent: {str(e)}")
+            return
+
+        with self.lock:
+            self.user_conversations[user_id] = {
+                "agent": agent,
+                "history": []
+            }
+
+        logger.info(f"Created new conversation for user {user_id}")
+
+        yield agent_pb2.AgentStreamResponse(
+            message="Agent conversation initialized"
+        )
 
     def SendAgentMessage(self, request, context):
-        thread_id = request.thread_id
         user_id = request.user_id
         message = request.message
 
-        logger.info(f"Received message for conversation {thread_id} from user {user_id}")
+        logger.info(f"Received message from user {user_id}")
 
         with self.lock:
-            if user_id not in self.active_conversations:
+            if user_id not in self.user_conversations:
                 context.set_code(grpc.StatusCode.NOT_FOUND)
-                context.set_details(f"No active conversation for user {user_id}")
+                context.set_details(
+                    f"No active conversation for user {user_id}"
+                )
                 return agent_pb2.SendAgentMessageResponse()
 
-            if self.active_conversations[user_id] != thread_id:
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details(f"Thread ID {thread_id} does not match active conversation for user {user_id}")
-                return agent_pb2.SendAgentMessageResponse()
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
-        response_message = f"Processed: {message}"
-
-        return agent_pb2.SendAgentMessageResponse(
-            message=response_message
-        )
+        try:
+            response_message = loop.run_until_complete(
+                self._process_message(user_id, message)
+            )
+            return agent_pb2.SendAgentMessageResponse(message=response_message)
+        except Exception as e:
+            logger.error(
+                f"Error processing message from user {user_id}: {str(e)}"
+            )
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Error processing message: {str(e)}")
+            return agent_pb2.SendAgentMessageResponse()

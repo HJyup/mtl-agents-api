@@ -11,7 +11,6 @@ import (
 
 var (
 	ErrorEmptyUserID          = errors.New("user ID is required")
-	ErrorEmptyConfigID        = errors.New("config ID is required")
 	ErrorNotFound             = errors.New("configuration not found")
 	ErrorInvalidEncryptionKey = errors.New("invalid encryption key length")
 )
@@ -51,15 +50,14 @@ func (svc *Service) CreateConfiguration(ctx context.Context, p *pb.CreateConfigu
 		return nil, ErrorEmptyUserID
 	}
 
-	config, err := svc.store.CreateConfiguration(ctx, p.UserId)
+	_, err := svc.store.CreateConfiguration(ctx, p.UserId)
 	if err != nil {
 		svc.logger.Error("failed to create configuration", zap.Error(err), zap.String("userID", p.UserId))
 		return nil, err
 	}
 
 	return &pb.CreateConfigurationResponse{
-		ConfigId: config.ID,
-		Message:  "Configuration created successfully",
+		Message: "Configuration created successfully",
 	}, nil
 }
 
@@ -84,25 +82,33 @@ func (svc *Service) GetConfiguration(ctx context.Context, p *pb.GetConfiguration
 		return nil, errors.New("failed to decrypt API key")
 	}
 
-	calendarConfig, thingsConfig := svc.mapAgentsToProtoConfigs(config.Agents)
+	googleAPIKey, err := utils.Decrypt(config.Calendar.GoogleAPIKey, svc.encKey)
+	if err != nil {
+		svc.logger.Error("failed to decrypt Google API key", zap.Error(err))
+		googleAPIKey = ""
+	}
 
 	return &pb.GetConfigurationResponse{
-		ConfigId:  config.ID,
 		UserId:    config.UserID,
 		OpenAiKey: openAIKey,
-		Calendar:  calendarConfig,
-		Things:    thingsConfig,
+		Calendar: &pb.CalendarConfig{
+			GoogleApiKey: googleAPIKey,
+			Context:      config.Calendar.Context,
+		},
+		Things: &pb.ThingsConfig{
+			Context: config.Things.Context,
+		},
 	}, nil
 }
 
 func (svc *Service) UpdateConfiguration(ctx context.Context, p *pb.UpdateConfigurationRequest) (*pb.UpdateConfigurationResponse, error) {
-	if p.ConfigId == "" {
-		return nil, ErrorEmptyConfigID
+	if p.UserId == "" {
+		return nil, ErrorEmptyUserID
 	}
 
-	existingConfig, err := svc.store.GetConfiguration(ctx, p.ConfigId)
+	existingConfig, err := svc.store.GetConfiguration(ctx, p.UserId)
 	if err != nil {
-		svc.logger.Error("failed to get configuration for update", zap.Error(err), zap.String("configID", p.ConfigId))
+		svc.logger.Error("failed to get configuration for update", zap.Error(err), zap.String("userID", p.UserId))
 		return nil, err
 	}
 
@@ -110,24 +116,46 @@ func (svc *Service) UpdateConfiguration(ctx context.Context, p *pb.UpdateConfigu
 		return nil, ErrorNotFound
 	}
 
-	encryptedOpenAIKey, err := utils.Encrypt(p.OpenAiKey, svc.encKey)
-	if err != nil {
-		svc.logger.Error("failed to encrypt OpenAI key", zap.Error(err))
-		return nil, errors.New("failed to encrypt API key")
+	encryptedOpenAIKey := existingConfig.OpenAIKey
+	if p.OpenAiKey != "" {
+		encryptedOpenAIKey, err = utils.Encrypt(p.OpenAiKey, svc.encKey)
+		if err != nil {
+			svc.logger.Error("failed to encrypt OpenAI key", zap.Error(err))
+			return nil, errors.New("failed to encrypt API key")
+		}
 	}
 
-	agents := svc.mapProtoConfigsToAgents(p.Calendar, p.Things)
+	calendarConfig := existingConfig.Calendar
+	thingsConfig := existingConfig.Things
 
-	config := &Configuration{
-		ID:        p.ConfigId,
-		UserID:    existingConfig.UserID,
+	if p.Calendar != nil {
+		if p.Calendar.GoogleApiKey != "" {
+			encryptedGoogleAPIKey, err := utils.Encrypt(p.Calendar.GoogleApiKey, svc.encKey)
+			if err != nil {
+				svc.logger.Error("failed to encrypt Google API key", zap.Error(err))
+				encryptedGoogleAPIKey = ""
+			}
+			calendarConfig.GoogleAPIKey = encryptedGoogleAPIKey
+		}
+		if p.Calendar.Context != "" {
+			calendarConfig.Context = p.Calendar.Context
+		}
+	}
+
+	if p.Things != nil && p.Things.Context != "" {
+		thingsConfig.Context = p.Things.Context
+	}
+
+	updatedConfig := &Configuration{
+		UserID:    p.UserId,
 		OpenAIKey: encryptedOpenAIKey,
-		Agents:    agents,
+		Calendar:  calendarConfig,
+		Things:    thingsConfig,
 	}
 
-	_, err = svc.store.UpdateConfiguration(ctx, config)
+	_, err = svc.store.UpdateConfiguration(ctx, updatedConfig)
 	if err != nil {
-		svc.logger.Error("failed to update configuration", zap.Error(err), zap.String("configID", p.ConfigId))
+		svc.logger.Error("failed to update configuration", zap.Error(err), zap.String("userID", p.UserId))
 		return nil, err
 	}
 
@@ -152,58 +180,4 @@ func (svc *Service) DeleteConfiguration(ctx context.Context, p *pb.DeleteConfigu
 		Success: true,
 		Message: "Configuration deleted successfully",
 	}, nil
-}
-
-func (svc *Service) mapAgentsToProtoConfigs(agents []Agent) (*pb.CalendarConfig, *pb.ThingsConfig) {
-	var calendarConfig *pb.CalendarConfig
-	var thingsConfig *pb.ThingsConfig
-
-	for _, agent := range agents {
-		switch agent.Type {
-		case "calendar":
-			googleAPIKey, err := utils.Decrypt(agent.GoogleAPIKey, svc.encKey)
-			if err != nil {
-				svc.logger.Error("failed to decrypt Google API key", zap.Error(err))
-				googleAPIKey = ""
-			}
-
-			calendarConfig = &pb.CalendarConfig{
-				GoogleApiKey: googleAPIKey,
-				Context:      agent.Context,
-			}
-		case "things":
-			thingsConfig = &pb.ThingsConfig{
-				Context: agent.Context,
-			}
-		}
-	}
-
-	return calendarConfig, thingsConfig
-}
-
-func (svc *Service) mapProtoConfigsToAgents(calendarConfig *pb.CalendarConfig, thingsConfig *pb.ThingsConfig) []Agent {
-	var agents []Agent
-
-	if calendarConfig != nil {
-		encryptedGoogleAPIKey, err := utils.Encrypt(calendarConfig.GoogleApiKey, svc.encKey)
-		if err != nil {
-			svc.logger.Error("failed to encrypt Google API key", zap.Error(err))
-			encryptedGoogleAPIKey = ""
-		}
-
-		agents = append(agents, Agent{
-			Type:         "calendar",
-			GoogleAPIKey: encryptedGoogleAPIKey,
-			Context:      calendarConfig.Context,
-		})
-	}
-
-	if thingsConfig != nil {
-		agents = append(agents, Agent{
-			Type:    "things",
-			Context: thingsConfig.Context,
-		})
-	}
-
-	return agents
 }

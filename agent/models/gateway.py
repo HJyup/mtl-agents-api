@@ -1,5 +1,4 @@
 from agents import Agent
-from calendar import agent as calendar_agent
 
 instructions = """
 A personal assistant which acts as a gateway agent that routes requests to a specific agent depending on the context. 
@@ -8,4 +7,4 @@ A personal assistant which acts as a gateway agent that routes requests to a spe
 - **General Agent**: Just answers any messages from user if context is not covered by any other models.
 """
 
-agent = Agent(name="Gateway agent", instructions=instructions, handoffs=[calendar_agent])
+_agent = Agent(name="Gateway agent", instructions=instructions)

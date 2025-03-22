@@ -34,16 +34,16 @@ func (s *Store) CreateConfiguration(ctx context.Context, userID string) (*servic
 	}
 
 	config := service.Configuration{
-		UserID: userID,
-		Agents: []service.Agent{},
+		UserID:    userID,
+		OpenAIKey: "",
+		Calendar:  service.CalendarConfig{},
+		Things:    service.ThingsConfig{},
 	}
 
-	result, err := collection.InsertOne(ctx, config)
+	_, err = collection.InsertOne(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create configuration: %w", err)
 	}
-
-	config.ID = result.InsertedID.(string)
 
 	return &config, nil
 }
@@ -53,6 +53,9 @@ func (s *Store) GetConfiguration(ctx context.Context, userID string) (*service.C
 	var config service.Configuration
 	err := collection.FindOne(ctx, bson.M{"user_id": userID}).Decode(&config)
 	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, errors.New("configuration not found")
+		}
 		return nil, fmt.Errorf("failed to get configuration: %w", err)
 	}
 
@@ -64,12 +67,7 @@ func (s *Store) UpdateConfiguration(ctx context.Context, config *service.Configu
 
 	filter := bson.M{"user_id": config.UserID}
 
-	if config.ID == "" {
-		filter = bson.M{"_id": config.ID}
-	}
-
 	opts := options.FindOneAndReplace().SetReturnDocument(options.After)
-
 	var updatedConfig service.Configuration
 	err := collection.FindOneAndReplace(ctx, filter, config, opts).Decode(&updatedConfig)
 	if err != nil {

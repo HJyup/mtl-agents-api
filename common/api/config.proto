@@ -24,24 +24,18 @@ service ConfigurationService {
 message CreateConfigurationRequest {
   // Unique identifier for the user
   string user_id = 1;
-
-  // OpenAI API key for the user's configuration
-  string open_ai_key = 2;
 }
 
 // Response message for configuration creation operation
 message CreateConfigurationResponse {
-  // Unique identifier for the newly created configuration
-  string config_id = 1;
-
   // Status message about the creation operation
-  string message = 2;
+  string message = 1;
 }
 
 // Request message for updating an existing configuration
 message UpdateConfigurationRequest {
   // Unique identifier for the configuration to update
-  string config_id = 1;
+  string user_id = 1;
 
   // Updated OpenAI API key
   string open_ai_key = 2;
@@ -70,20 +64,17 @@ message GetConfigurationRequest {
 
 // Response message containing a user's configuration details
 message GetConfigurationResponse {
-  // Unique identifier for the configuration
-  string config_id = 1;
-
   // User ID associated with this configuration
-  string user_id = 2;
+  string user_id = 1;
 
   // OpenAI API key stored in the configuration
-  string open_ai_key = 3;
+  string open_ai_key = 2;
 
   // Calendar integration settings
-  CalendarConfig calendar = 4;
+  CalendarConfig calendar = 3;
 
   // Things (task management) integration settings
-  ThingsConfig things = 5;
+  ThingsConfig things = 4;
 }
 
 // Request message for deleting a configuration by user ID

@@ -89,4 +89,4 @@ def fetch_google_calendar_events(start_date, end_date):
     events = events_result.get('items', [])
     return events
 
-agent = Agent(name="Gateway agent", instructions=instructions, tools=[get_google_people_contacts, fetch_google_calendar_events])
+_agent = Agent(name="Gateway agent", instructions=instructions, tools=[get_google_people_contacts, fetch_google_calendar_events])
