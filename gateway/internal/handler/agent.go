@@ -2,19 +2,22 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/HJyup/mlt-gateway/internal/models"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
 	pb "github.com/HJyup/mtl-common/api"
 	"github.com/HJyup/mtl-common/utils"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
-	"io"
-	"net/http"
+	"google.golang.org/grpc"
 )
 
 type AgentGateway interface {
-	CreateAgentStream(ctx context.Context, req *pb.CreateAgentStreamRequest) (pb.AgentService_CreateAgentStreamClient, error)
-	SendAgentMessage(ctx context.Context, req *pb.SendAgentMessageRequest) (*pb.SendAgentMessageResponse, error)
+	AgentWebsocketStream(ctx context.Context, opts ...grpc.CallOption) (pb.AgentService_AgentWebsocketStreamClient, error)
 }
 
 type AgentHandler struct {
@@ -37,89 +40,166 @@ func NewAgentHandler(gateway AgentGateway) *AgentHandler {
 
 func (h *AgentHandler) RegisterRoutes(router *mux.Router) {
 	agentRouter := router.PathPrefix("/api/v1/agents").Subrouter()
-	agentRouter.Handle("/stream", utils.TokenAuthMiddleware(http.HandlerFunc(h.HandleCreateAgentStream))).Methods("GET")
-	agentRouter.Handle("/message", utils.TokenAuthMiddleware(http.HandlerFunc(h.HandleSendAgentMessage))).Methods("POST")
+	agentRouter.Handle("/ws", utils.TokenAuthMiddleware(http.HandlerFunc(h.HandleWebsocket))).Methods("GET")
 }
 
-func (h *AgentHandler) HandleCreateAgentStream(w http.ResponseWriter, r *http.Request) {
+type WebSocketMessage struct {
+	Type     string            `json:"type"`
+	Content  string            `json:"content"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+func (h *AgentHandler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value("userID").(string)
 	if !ok {
 		utils.WriteError(w, http.StatusUnauthorized, "Unauthorized")
-		return
-	}
-
-	configID := r.URL.Query().Get("config_id")
-	if configID == "" {
-		utils.WriteError(w, http.StatusBadRequest, "Missing config_id parameter")
 		return
 	}
 
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		log.Printf("Failed to upgrade connection: %v", err)
 		return
 	}
 	defer conn.Close()
 
-	stream, err := h.gateway.CreateAgentStream(r.Context(), &pb.CreateAgentStreamRequest{
-		UserId: userID,
-	})
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Hour)
+	defer cancel()
+
+	stream, err := h.gateway.AgentWebsocketStream(ctx)
 	if err != nil {
-		errorMessage := map[string]string{"error": err.Error()}
-		conn.WriteJSON(errorMessage)
-		return
-	}
-
-	for {
-		response, err := stream.Recv()
-		if err == io.EOF {
-			break
+		errorMsg := WebSocketMessage{
+			Type:    "ERROR",
+			Content: fmt.Sprintf("Failed to create agent stream: %v", err),
 		}
-		if err != nil {
-			errorMessage := map[string]string{"error": err.Error()}
-			conn.WriteJSON(errorMessage)
-			break
-		}
-
-		if err := conn.WriteJSON(response); err != nil {
-			break
-		}
-	}
-}
-
-func (h *AgentHandler) HandleSendAgentMessage(w http.ResponseWriter, r *http.Request) {
-	userID, ok := r.Context().Value("userID").(string)
-	if !ok {
-		utils.WriteError(w, http.StatusUnauthorized, "Unauthorized")
+		conn.WriteJSON(errorMsg)
 		return
 	}
 
-	var reqBody models.SendAgentMessageRequest
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		utils.WriteError(w, http.StatusBadRequest, "Failed to read request body")
-		return
-	}
-	defer r.Body.Close()
-
-	if err = json.Unmarshal(body, &reqBody); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON")
-		return
-	}
-
-	if reqBody.Message == "" {
-		utils.WriteError(w, http.StatusBadRequest, "Message is required")
-		return
-	}
-
-	resp, err := h.gateway.SendAgentMessage(r.Context(), &pb.SendAgentMessageRequest{
+	initMsg := &pb.AgentMessage{
+		Type:    pb.MessageType_INITIALIZE,
 		UserId:  userID,
-		Message: reqBody.Message,
-	})
-	if err != nil {
-		utils.WriteError(w, http.StatusInternalServerError, err.Error())
+		Content: "initial content",
+	}
+	if err = stream.Send(initMsg); err != nil {
+		errorMsg := WebSocketMessage{
+			Type:    "ERROR",
+			Content: fmt.Sprintf("Failed to initialize agent: %v", err),
+		}
+		conn.WriteJSON(errorMsg)
 		return
 	}
 
-	utils.WriteJSON(w, http.StatusOK, resp)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	done := make(chan struct{})
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				response, err := stream.Recv()
+				if err == io.EOF {
+					return
+				}
+				if err != nil {
+					log.Printf("Error receiving from stream: %v", err)
+					errorMsg := WebSocketMessage{
+						Type:    "ERROR",
+						Content: fmt.Sprintf("Stream error: %v", err),
+					}
+					conn.WriteJSON(errorMsg)
+					close(done)
+					return
+				}
+
+				wsMsg := WebSocketMessage{
+					Content:  response.Content,
+					Metadata: response.Metadata,
+				}
+
+				switch response.Type {
+				case pb.MessageType_AGENT_RESPONSE:
+					wsMsg.Type = "AGENT_RESPONSE"
+				case pb.MessageType_ERROR:
+					wsMsg.Type = "ERROR"
+				case pb.MessageType_CLOSE:
+					wsMsg.Type = "CLOSE"
+					defer close(done)
+				default:
+					wsMsg.Type = "UNKNOWN"
+				}
+
+				if err := conn.WriteJSON(wsMsg); err != nil {
+					log.Printf("Error writing to websocket: %v", err)
+					close(done)
+					return
+				}
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				var wsMsg WebSocketMessage
+				if err := conn.ReadJSON(&wsMsg); err != nil {
+					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+						log.Printf("WebSocket closed unexpectedly: %v", err)
+					}
+					closeMsg := &pb.AgentMessage{
+						Type:    pb.MessageType_CLOSE,
+						UserId:  userID,
+						Content: "Connection closed by client",
+					}
+					err = stream.Send(closeMsg)
+					if err != nil {
+						log.Printf("Error sending close message: %v", err)
+					}
+					close(done)
+					return
+				}
+
+				var msgType pb.MessageType
+				switch wsMsg.Type {
+				case "USER_MESSAGE":
+					msgType = pb.MessageType_USER_MESSAGE
+				case "CLOSE":
+					msgType = pb.MessageType_CLOSE
+					defer close(done)
+				default:
+					log.Printf("Unknown message type: %s", wsMsg.Type)
+					continue
+				}
+
+				grpcMsg := &pb.AgentMessage{
+					Type:     msgType,
+					UserId:   userID,
+					Content:  wsMsg.Content,
+					Metadata: wsMsg.Metadata,
+				}
+
+				if err := stream.Send(grpcMsg); err != nil {
+					log.Printf("Error sending to stream: %v", err)
+					errorMsg := WebSocketMessage{
+						Type:    "ERROR",
+						Content: fmt.Sprintf("Failed to send message: %v", err),
+					}
+					conn.WriteJSON(errorMsg)
+					close(done)
+					return
+				}
+			}
+		}
+	}()
+
+	wg.Wait()
 }

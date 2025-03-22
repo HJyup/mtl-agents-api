@@ -1,6 +1,6 @@
 import logging
 import asyncio
-import grpc
+import threading
 from threading import Lock
 from typing import Dict, Any
 
@@ -16,6 +16,23 @@ class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
         self.configuration_service = configuration_service
         self.user_conversations: Dict[str, Dict[str, Any]] = {}
         self.lock = Lock()
+
+        self.loop = asyncio.new_event_loop()
+
+        self.loop_thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        self.loop_thread.start()
+        logger.info("Event loop started in background thread")
+
+    def _run_event_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+
+    def __del__(self):
+        logger.info("Cleaning up AgentServicer resources")
+        if hasattr(self, 'loop') and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            if hasattr(self, 'loop_thread'):
+                self.loop_thread.join(timeout=5)
 
     async def _process_message(self, user_id: str, message: str) -> str:
         conversation_data = self.user_conversations.get(user_id)
@@ -34,64 +51,138 @@ class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
         conversation_data["history"].append(result.final_output)
         return result.final_output
 
-    def CreateAgentStream(self, request, context):
-        user_id = request.user_id
-
+    async def _initialize_agent(self, user_id: str) -> str:
         try:
             config = self.configuration_service.get_configuration(user_id)
             if not config:
-                context.set_code(grpc.StatusCode.NOT_FOUND)
-                context.set_details(f"Configuration not found for user {user_id}")
-                return
+                return f"ERROR: Configuration not found for user {user_id}"
 
             agent = create_agent_for_user(config)
+
+            with self.lock:
+                self.user_conversations[user_id] = {
+                    "agent": agent,
+                    "history": []
+                }
+
+            logger.info(f"Created new conversation for user {user_id}")
+            return "Agent conversation initialized successfully"
+
         except Exception as e:
             logger.error(f"Failed to create agent for user {user_id}: {str(e)}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Failed to create agent: {str(e)}")
-            return
+            return f"ERROR: Failed to create agent: {str(e)}"
 
+    async def _close_agent(self, user_id: str) -> None:
         with self.lock:
-            self.user_conversations[user_id] = {
-                "agent": agent,
-                "history": []
-            }
+            if user_id in self.user_conversations:
+                del self.user_conversations[user_id]
+                logger.info(f"Closed conversation for user {user_id}")
 
-        logger.info(f"Created new conversation for user {user_id}")
+    async def _handle_stream(self, request_iterator, response_queue):
+        user_id = None
+        try:
+            for request in request_iterator:
+                logger.info(f"Processing request: {request}")
 
-        yield agent_pb2.AgentStreamResponse(
-            message="Agent conversation initialized"
+                if not user_id and request.type != agent_pb2.MessageType.INITIALIZE:
+                    await response_queue.put(agent_pb2.AgentMessage(
+                        type=agent_pb2.MessageType.ERROR,
+                        content="Conversation must be initialized first"
+                    ))
+                    continue
+
+                if request.type == agent_pb2.MessageType.INITIALIZE:
+                    user_id = request.user_id
+                    logger.info(f"Initializing agent for user: {user_id}")
+                    result = await self._initialize_agent(user_id)
+
+                    if result.startswith("ERROR:"):
+                        await response_queue.put(agent_pb2.AgentMessage(
+                            type=agent_pb2.MessageType.ERROR,
+                            user_id=user_id,
+                            content=result
+                        ))
+                    else:
+                        await response_queue.put(agent_pb2.AgentMessage(
+                            type=agent_pb2.MessageType.AGENT_RESPONSE,
+                            user_id=user_id,
+                            content=result
+                        ))
+
+                elif request.type == agent_pb2.MessageType.USER_MESSAGE:
+                    try:
+                        logger.info(f"Processing user message from {user_id}: {request.content[:50]}...")
+                        user_message_response = await self._process_message(user_id, request.content)
+                        await response_queue.put(agent_pb2.AgentMessage(
+                            type=agent_pb2.MessageType.AGENT_RESPONSE,
+                            user_id=user_id,
+                            content=user_message_response,
+                            metadata=request.metadata
+                        ))
+                    except Exception as e:
+                        logger.error(f"Error processing message: {str(e)}")
+                        await response_queue.put(agent_pb2.AgentMessage(
+                            type=agent_pb2.MessageType.ERROR,
+                            user_id=user_id,
+                            content=f"Error processing message: {str(e)}"
+                        ))
+
+                elif request.type == agent_pb2.MessageType.CLOSE:
+                    logger.info(f"Closing conversation for user {user_id}")
+                    await self._close_agent(user_id)
+                    await response_queue.put(agent_pb2.AgentMessage(
+                        type=agent_pb2.MessageType.AGENT_RESPONSE,
+                        user_id=user_id,
+                        content="Conversation closed successfully"
+                    ))
+                    break
+
+        except Exception as e:
+            logger.error(f"Stream error: {str(e)}")
+            if user_id:
+                await response_queue.put(agent_pb2.AgentMessage(
+                    type=agent_pb2.MessageType.ERROR,
+                    user_id=user_id,
+                    content=f"Stream error: {str(e)}"
+                ))
+                await self._close_agent(user_id)
+
+        finally:
+            logger.info("Stream processing complete, sending None to terminate")
+            if user_id and user_id in self.user_conversations:
+                await self._close_agent(user_id)
+            await response_queue.put(None)
+
+    def AgentWebsocketStream(self, request_iterator, context):
+        logger.info("New websocket stream connection established")
+        response_queue = asyncio.Queue()
+
+        future = asyncio.run_coroutine_threadsafe(
+            self._handle_stream(request_iterator, response_queue),
+            self.loop
         )
 
-    def SendAgentMessage(self, request, context):
-        user_id = request.user_id
-        message = request.message
+        def on_done(fut):
+            try:
+                fut.result()
+            except Exception as e:
+                logger.error(f"Unhandled exception in handle_stream: {e}")
 
-        logger.info(f"Received message from user {user_id}")
-
-        with self.lock:
-            if user_id not in self.user_conversations:
-                context.set_code(grpc.StatusCode.NOT_FOUND)
-                context.set_details(
-                    f"No active conversation for user {user_id}"
-                )
-                return agent_pb2.SendAgentMessageResponse()
+        future.add_done_callback(on_done)
 
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            while True:
+                get_future = asyncio.run_coroutine_threadsafe(response_queue.get(), self.loop)
+                response = get_future.result()
 
-        try:
-            response_message = loop.run_until_complete(
-                self._process_message(user_id, message)
-            )
-            return agent_pb2.SendAgentMessageResponse(message=response_message)
+                if response is None:
+                    logger.info("Received None response, ending stream")
+                    break
+
+                logger.info(f"Yielding response: type={response.type}")
+                yield response
+
         except Exception as e:
-            logger.error(
-                f"Error processing message from user {user_id}: {str(e)}"
-            )
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Error processing message: {str(e)}")
-            return agent_pb2.SendAgentMessageResponse()
+            logger.error(f"Error in response generator: {e}")
+
+        logger.info("Websocket stream complete")

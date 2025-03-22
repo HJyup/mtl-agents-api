@@ -7,38 +7,31 @@ package api;
 // AgentService provides functionality for creating agent conversation streams
 // and sending messages within those conversations
 service AgentService {
-  // Creates a new agent conversation stream
-  // The server returns a stream of responses that will continue until closed
-  rpc CreateAgentStream(CreateAgentStreamRequest) returns (stream AgentStreamResponse);
-
-  // Sends a message to an existing agent conversation
-  // Returns a single response for each message sent
-  rpc SendAgentMessage(SendAgentMessageRequest) returns (SendAgentMessageResponse);
+  // Creates a websocket connection for bidirectional communication with an agent
+  // Both client and server can send messages through this stream
+  rpc AgentWebsocketStream(stream AgentMessage) returns (stream AgentMessage);
 }
 
-// Request message for creating a new agent conversation stream
-message CreateAgentStreamRequest {
-  // Unique identifier for the user initiating the conversation
-  string user_id = 1;
+// Message for bidirectional communication over the websocket
+message AgentMessage {
+  // Type of message being sent
+  MessageType type = 1;
+
+  // User ID for authentication and conversation tracking
+  string user_id = 2;
+
+  // Content of the message (from user to agent or agent to user)
+  string content = 3;
+
+  // Optional metadata for special operations like initialization or closing
+  map<string, string> metadata = 4;
 }
 
-// Response message returned in the agent conversation stream
-message AgentStreamResponse {
-  // Content of the message from the agent
-  string message = 1;
-}
-
-// Request message for sending a message to an existing agent conversation
-message SendAgentMessageRequest {
-  // Identifier of the user sending the message
-  string user_id = 1;
-
-  // Content of the message being sent to the agent
-  string message = 2;
-}
-
-// Response message returned after sending a message to an agent
-message SendAgentMessageResponse {
-  // Content of the agent's response message
-  string message = 1;
+// Types of messages that can be sent over the websocket
+enum MessageType {
+  INITIALIZE = 0;  // Used to initialize a conversation
+  USER_MESSAGE = 1;  // Message from user to agent
+  AGENT_RESPONSE = 2;  // Response from agent to user
+  ERROR = 3;  // Error messages
+  CLOSE = 4;  // Signal to close the conversation
 }

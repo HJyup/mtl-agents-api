@@ -29,7 +29,7 @@ func NewUserHandler(gateway UserGateway) *UserHandler {
 func (h *UserHandler) RegisterRoutes(router *mux.Router) {
 	userRouter := router.PathPrefix("/api/v1/users").Subrouter()
 	userRouter.HandleFunc("/sign-up", h.HandleCreateUser).Methods("POST")
-	userRouter.Handle("/sign-in", utils.TokenAuthMiddleware(http.HandlerFunc(h.HandleAuthUser))).Methods("GET")
+	userRouter.HandleFunc("/sign-in", h.HandleAuthUser).Methods("POST")
 	userRouter.Handle("/{userId}", utils.TokenAuthMiddleware(http.HandlerFunc(h.HandleGetUser))).Methods("GET")
 	userRouter.Handle("/{userId}", utils.TokenAuthMiddleware(http.HandlerFunc(h.HandleDeleteUser))).Methods("DELETE")
 }

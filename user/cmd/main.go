@@ -13,18 +13,19 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"net"
+
+	_ "github.com/joho/godotenv/autoload"
 )
 
 type Specification struct {
-	ServiceName string `required:"true" default:"user"`
-	Address     string `required:"true"`
-	Consul      string `required:"true"`
-	Environment string `required:"true"`
-	DBUser      string `required:"true"`
-	DBPassword  string `required:"true"`
-	DBName      string `required:"true"`
-	DBHost      string `required:"true"`
-	DBPort      string `required:"true"`
+	ServiceName      string `required:"true" default:"user"`
+	Address          string `required:"true"`
+	Consul           string `required:"true"`
+	Environment      string `required:"true"`
+	PostgresUser     string `required:"true" envconfig:"postgres_user"`
+	PostgresPassword string `required:"true" envconfig:"postgres_password"`
+	PostgresDBName   string `required:"true" envconfig:"postgres_db_name"`
+	PostgresPort     string `required:"true" envconfig:"postgres_port"`
 }
 
 func main() {
@@ -44,7 +45,7 @@ func main() {
 		logger.Fatal("Failed to process environment variables", zap.Error(err))
 	}
 
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", s.DBUser, s.DBPassword, s.DBName, s.DBPort, s.DBHost)
+	dsn := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", s.PostgresUser, s.PostgresPassword, s.PostgresPort, s.PostgresDBName)
 
 	config, err := pgx.ParseConfig(dsn)
 	if err != nil {

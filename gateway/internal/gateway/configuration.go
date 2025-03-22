@@ -15,7 +15,7 @@ type Configuration interface {
 }
 
 var (
-	ConfigurationServiceName          = "user"
+	ConfigurationServiceName          = "configuration"
 	FailedToConnectConfigurationError = "Failed to connect to configuration service"
 )
 
